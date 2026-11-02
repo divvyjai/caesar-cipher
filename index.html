@@ -1,13 +1,283 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Caesar Cipher</title>
-  <script src="./mini-coi.js"></script>
-  <link rel="stylesheet" href="https://pyscript.net/releases/2026.7.3/core.css" />
-  <script type="module" src="https://pyscript.net/releases/2026.7.3/core.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caesar Cipher</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --text: #1d2330; --muted: #5d6677;
+    --border: #d9dde5; --accent: #2f5fd0; --accent-text: #ffffff;
+    --term-bg: #12161f; --term-text: #dfe6f3; --term-dim: #8b95a8; --term-user: #8fd694;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1218; --panel: #181c25; --text: #e6eaf2; --muted: #9aa4b6;
+      --border: #2a303c; --accent: #6b93f0; --accent-text: #0f1218;
+      --term-bg: #0a0d13; --term-text: #dfe6f3; --term-dim: #7f8aa0; --term-user: #8fd694;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 40px; }
+  h1 { margin: 0 0 4px; font-size: 1.5rem; }
+  .sub { margin: 0 0 20px; color: var(--muted); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .tabs button, .row button {
+    font: inherit; cursor: pointer; border-radius: 8px; padding: 8px 14px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  }
+  .tabs button[aria-pressed="true"] {
+    background: var(--accent); color: var(--accent-text); border-color: var(--accent);
+  }
+  .tabs button:disabled { opacity: .5; cursor: default; }
+  .term {
+    background: var(--term-bg); color: var(--term-text); border-radius: 10px;
+    padding: 14px 16px; height: 440px; overflow-y: auto;
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .term .user { color: var(--term-user); }
+  .term .sys { color: var(--term-dim); }
+  .row { display: flex; gap: 8px; margin-top: 10px; }
+  .row input {
+    flex: 1; min-width: 0; font: 15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--text);
+  }
+  .row input:disabled { opacity: .55; }
+  .row button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .row button:disabled { opacity: .5; cursor: default; }
+  .hint { margin: 10px 0 0; font-size: .875rem; color: var(--muted); }
+</style>
 </head>
 <body>
-  <script type="py" src="web_loader.py" config="pyscript.toml" terminal></script>
+<main>
+  <h1>Caesar Cipher</h1>
+  <p class="sub">The original Python programs, running in your browser.</p>
+
+  <div class="tabs" id="tabs" role="group" aria-label="Choose a program">
+    <button type="button" data-n="1" aria-pressed="false" disabled>Section 1</button>
+    <button type="button" data-n="2" aria-pressed="false" disabled>Section 2</button>
+    <button type="button" data-n="3" aria-pressed="false" disabled>Section 3</button>
+    <button type="button" data-n="4" aria-pressed="false" disabled>Section 4</button>
+  </div>
+
+  <div class="term" id="term" role="log" aria-live="polite"></div>
+
+  <form class="row" id="form" autocomplete="off">
+    <input id="entry" type="text" aria-label="Program input" placeholder="Type here and press Enter" disabled>
+    <button type="submit" class="primary" id="send" disabled>Enter</button>
+    <button type="button" id="restart" disabled>Restart</button>
+  </form>
+  <p class="hint">The first load downloads the Python runtime (a few MB), so give it a moment.</p>
+</main>
+
+<script type="text/x-python" id="runner">
+import ast, sys, inspect, traceback
+import js
+
+STOPPED = "__stopped__"
+
+class _Out:
+    encoding = "utf-8"
+    def write(self, s):
+        js.consoleWrite(s)
+        return len(s)
+    def flush(self):
+        pass
+    def isatty(self):
+        return False
+
+async def _input(prompt=""):
+    answer = await js.consoleInput(str(prompt))
+    return str(answer)
+
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+def _walk_scope(node):
+    # Every node inside `node`, without entering nested functions or classes.
+    for child in ast.iter_child_nodes(node):
+        yield child
+        if not isinstance(child, _SCOPES):
+            yield from _walk_scope(child)
+
+def _async_names(tree):
+    # Names of functions that call input(), directly or through other such functions.
+    defs = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
+    names = set()
+    changed = True
+    while changed:
+        changed = False
+        for fn in defs:
+            if fn.name in names:
+                continue
+            for n in _walk_scope(fn):
+                if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                        and (n.func.id == "input" or n.func.id in names)):
+                    names.add(fn.name)
+                    changed = True
+                    break
+    return names
+
+class _Asyncify(ast.NodeTransformer):
+    def __init__(self, names):
+        self.names = names
+    def visit_Call(self, node):
+        self.generic_visit(node)
+        if isinstance(node.func, ast.Name) and (node.func.id == "input" or node.func.id in self.names):
+            return ast.copy_location(ast.Await(value=node), node)
+        return node
+    def visit_FunctionDef(self, node):
+        self.generic_visit(node)
+        if node.name in self.names:
+            new = ast.AsyncFunctionDef(**{f: getattr(node, f) for f in node._fields})
+            return ast.copy_location(new, node)
+        return node
+
+async def run_section(src, filename):
+    old = sys.stdout, sys.stderr
+    sys.stdout = sys.stderr = _Out()
+    try:
+        tree = ast.parse(src, filename)
+        names = _async_names(tree)
+        tree = _Asyncify(names).visit(tree)
+        ast.fix_missing_locations(tree)
+        code = compile(tree, filename, "exec", flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
+        ns = {"__name__": "__main__", "input": _input}
+        result = eval(code, ns)
+        if inspect.isawaitable(result):
+            await result
+    except BaseException as e:
+        if STOPPED in str(e):
+            return "stopped"
+        traceback.print_exc()
+        return "error"
+    finally:
+        sys.stdout, sys.stderr = old
+    return "done"
+</script>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script>
+(function () {
+  var term = document.getElementById("term");
+  var form = document.getElementById("form");
+  var entry = document.getElementById("entry");
+  var send = document.getElementById("send");
+  var restart = document.getElementById("restart");
+  var tabs = Array.prototype.slice.call(document.querySelectorAll("#tabs button"));
+
+  var pyodide = null;
+  var pending = null;     // { resolve, reject } while the program waits for input
+  var current = 1;        // selected section
+  var runId = 0;          // guards against output from a stopped run
+  var wordlistReady = false;
+
+  function append(text, cls) {
+    var node = document.createElement("span");
+    if (cls) node.className = cls;
+    node.textContent = text;
+    term.appendChild(node);
+    term.scrollTop = term.scrollHeight;
+  }
+
+  function setWaiting(on) {
+    entry.disabled = !on;
+    send.disabled = !on;
+    if (on) entry.focus();
+  }
+
+  // Called from Python (through the js module)
+  window.consoleWrite = function (s) { append(String(s)); };
+  window.consoleInput = function (prompt) {
+    return new Promise(function (resolve, reject) {
+      append(String(prompt));
+      pending = { resolve: resolve, reject: reject };
+      setWaiting(true);
+    });
+  };
+
+  form.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    if (!pending) return;
+    var value = entry.value;
+    entry.value = "";
+    append(value + "\n", "user");
+    var p = pending;
+    pending = null;
+    setWaiting(false);
+    p.resolve(value);
+  });
+
+  function stopCurrent() {
+    runId += 1;
+    if (pending) {
+      var p = pending;
+      pending = null;
+      setWaiting(false);
+      p.reject(new Error("__stopped__"));
+    }
+  }
+
+  async function loadWordlist() {
+    if (wordlistReady) return;
+    var res = await fetch("wordlist.txt");
+    if (!res.ok) res = await fetch("Files/wordlist.txt");
+    if (!res.ok) throw new Error("Could not find wordlist.txt next to this page.");
+    var text = await res.text();
+    try { pyodide.FS.mkdir("Files"); } catch (e) { /* already exists */ }
+    pyodide.FS.writeFile("Files/wordlist.txt", text);
+    wordlistReady = true;
+  }
+
+  async function runSection(n) {
+    stopCurrent();
+    var myRun = runId;
+    current = n;
+    tabs.forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.n === String(n))); });
+    term.textContent = "";
+    var name = "section" + n + ".py";
+    try {
+      await loadWordlist();
+      var res = await fetch(name);
+      if (!res.ok) throw new Error("Could not load " + name + " (HTTP " + res.status + ").");
+      var src = await res.text();
+      if (myRun !== runId) return;
+      pyodide.globals.set("_SRC", src);
+      pyodide.globals.set("_NAME", name);
+      var status = await pyodide.runPythonAsync("await run_section(_SRC, _NAME)");
+      if (myRun !== runId) return;
+      if (status === "done") append("\n[program finished]\n", "sys");
+      else if (status === "error") append("\n[program stopped because of an error]\n", "sys");
+    } catch (err) {
+      if (myRun === runId) append("\n[" + err.message + "]\n", "sys");
+    }
+  }
+
+  tabs.forEach(function (b) {
+    b.addEventListener("click", function () { runSection(Number(b.dataset.n)); });
+  });
+  restart.addEventListener("click", function () { runSection(current); });
+
+  (async function boot() {
+    append("Loading Python...\n", "sys");
+    try {
+      pyodide = await loadPyodide();
+      pyodide.runPython(document.getElementById("runner").textContent);
+    } catch (err) {
+      term.textContent = "";
+      append("Could not load the Python runtime: " + err.message + "\n", "sys");
+      return;
+    }
+    tabs.forEach(function (b) { b.disabled = false; });
+    restart.disabled = false;
+    runSection(1);
+  })();
+})();
+</script>
 </body>
 </html>
