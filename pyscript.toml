@@ -1,2 +1,5 @@
 [files]
 "./wordlist.txt" = "./Files/wordlist.txt"
+"./section1.py" = "./section1.py"
+"./section2.py" = "./section2.py"
+"./section3.py" = "./section3.py"
